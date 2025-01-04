@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         with:
-          repository: 'PapillonApp/Papillon.git'
+          repository: PapillonApp/Papillon
           fetch-depth: 0
       
       - name: Check for changes
