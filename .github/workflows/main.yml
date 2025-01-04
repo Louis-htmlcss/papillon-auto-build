@@ -1,0 +1,83 @@
+name: Build Android
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'
+
+jobs:
+  build_android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          repository: 'PapillonApp/Papillon.git'
+          fetch-depth: 0
+      
+      - name: Check for changes
+        id: check_changes
+        run: |
+          git fetch --tags
+          LATEST_TAG=$(git describe --tags `git rev-list --tags --max-count=1` || echo "none")
+          if [ "$LATEST_TAG" = "none" ]; then
+            echo "SHOULD_BUILD=true" >> $GITHUB_OUTPUT
+          else
+            CHANGES=$(git diff $LATEST_TAG HEAD)
+            if [ -n "$CHANGES" ]; then
+              echo "SHOULD_BUILD=true" >> $GITHUB_OUTPUT
+            else
+              echo "SHOULD_BUILD=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Setup Node.js
+        if: steps.check_changes.outputs.SHOULD_BUILD == 'true'
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        if: steps.check_changes.outputs.SHOULD_BUILD == 'true'
+        run: npm ci
+
+      - name: Setup Java
+        if: steps.check_changes.outputs.SHOULD_BUILD == 'true'
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Build Android app
+        if: steps.check_changes.outputs.SHOULD_BUILD == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          echo $KEYSTORE_BASE64 | base64 --decode > android/app/release.keystore
+          
+          cd android
+          ./gradlew assembleRelease
+
+      - name: Create Release
+        if: steps.check_changes.outputs.SHOULD_BUILD == 'true'
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ github.run_number }}
+          release_name: Release v${{ github.run_number }}
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset
+        if: steps.check_changes.outputs.SHOULD_BUILD == 'true'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: android/app/build/outputs/apk/release/app-release.apk
+          asset_name: app-release.apk
+          asset_content_type: application/vnd.android.package-archive
